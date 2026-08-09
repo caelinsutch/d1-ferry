@@ -13,16 +13,17 @@ Expect an initial response within a few days.
 This tool holds a Cloudflare API token and writes to your databases, so the areas
 most worth scrutiny are:
 
-- **SQL injection via inlined literals.** D1 caps bound parameters at 100 per query,
-  so bulk `INSERT`s are built by escaping and inlining literals
-  (`src/core/sql.ts`). A bypass of `quoteString`, `quoteIdent`, or `encodeBlob` that
-  lets attacker-controlled source data terminate a literal is a vulnerability, not a
-  bug. This code is deliberately small and directly unit-tested.
+- **SQL injection via inlined literals.** D1 caps bound parameters at 100 per
+  query, so bulk `INSERT`s are built by escaping and inlining literals
+  (`src/core/sql.ts`). A bypass of `quoteString`, `quoteIdent`, or `encodeBlob`
+  that lets attacker-controlled source data terminate a literal is a
+  vulnerability, not a bug. This code is small, directly unit-tested, and covered
+  by round-trip tests against real SQLite.
 - **Credential handling.** The token is read from `--api-token` or
-  `CLOUDFLARE_API_TOKEN` and sent only to `api.cloudflare.com` and the presigned R2
-  upload URL that D1's import endpoint returns. It is never written to disk. Note
-  that a token passed as a CLI flag is visible in your shell history and process list;
-  prefer the environment variable.
+  `CLOUDFLARE_API_TOKEN` and sent only to `api.cloudflare.com` and the presigned
+  R2 upload URL that D1's import endpoint returns. It is never written to disk.
+  Note that a token passed as a CLI flag is visible in your shell history and
+  process list; prefer the environment variable.
 - **Checkpoint files.** `.d1x/*.json` records table names, row counts, and cursor
   values — the last-seen primary key of each table. Cursors can therefore contain
   real data. `.d1x/` is gitignored by default; treat it as sensitive.

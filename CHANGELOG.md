@@ -7,6 +7,35 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+Four data-fidelity bugs, all found by new end-to-end round-trip tests that run the
+real pipeline against actual SQLite (`src/core/roundtrip.test.ts`) rather than
+asserting the encoder against its own assumptions.
+
+- **BLOBs were rewritten as their hex text.** `readProjection` emitted `hex(col)`,
+  and the encoder could not tell the resulting string from real text, so it quoted
+  it (`'DEAD'` instead of `X'dead'`). Affected every BLOB in every table.
+- **A NULL in a pagination key silently truncated the copy.** SQLite only enforces
+  NOT NULL on primary keys for `WITHOUT ROWID` and `STRICT` tables, so an ordinary
+  `TEXT PRIMARY KEY` may hold NULL; `col > NULL` matches nothing, so the reader saw
+  an empty page, concluded the table had ended, and reported success having copied
+  only part of it. Pagination now prefers `rowid`.
+- **TEXT containing a NUL byte was truncated at the NUL.** Such values now travel
+  as hex and are restored with `CAST(X'..' AS TEXT)`.
+- **Any REAL of magnitude >= 2^53 crashed the copy**, because `Number.isInteger` is
+  true for values like `1.8e308`. Affinity now disambiguates an integral REAL from
+  an integer that has lost precision.
+
+### Changed
+
+- Values now cross the wire with a `typeof()` tag and are decoded back to their
+  exact storage class. SQLite types are per-value, not per-column, so inferring the
+  class from a column's declared affinity was the root cause of two of the bugs
+  above. REAL deliberately travels as a JSON number, which round-trips a float64
+  exactly and avoids SQLite's lossy default real-to-text conversion.
+- Ordinary tables page on `rowid` instead of the declared primary key.
+
 ## [0.1.0] - 2026-08-08
 
 Initial release.
