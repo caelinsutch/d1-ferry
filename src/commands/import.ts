@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 
-import { D1_LIMITS } from "../core/limits.ts";
+import { D1_LIMITS, MAX_IN_MEMORY_SQL_BYTES } from "../core/limits.ts";
 import { isUnsupportedStatement, splitStatements } from "../core/splitter.ts";
 import { byteLength } from "../core/sql.ts";
 import { CliError } from "../util/errors.ts";
@@ -47,8 +47,23 @@ export function registerImport(program: Command): void {
         const totalBytes = handle.size;
         logger.info(`Source file is ${formatBytes(totalBytes)}.`);
 
-        // Read as text: SQL dumps are text, and Bun handles multi-GB strings well
-        // enough that streaming the tokenizer is not worth the complexity here.
+        // The whole file is tokenized as one string, so it has to fit in memory.
+        // Bun's string allocation fails around 2 GB, well below D1's own 5 GiB import
+        // ceiling, so refuse up front with a concrete remedy rather than dying with an
+        // out-of-memory error part-way through.
+        if (totalBytes > MAX_IN_MEMORY_SQL_BYTES) {
+          throw new CliError(
+            `${file} is ${formatBytes(totalBytes)}, larger than the ` +
+              `${formatBytes(MAX_IN_MEMORY_SQL_BYTES)} this command can hold in memory.`,
+            {
+              hint:
+                "Split the file and import the parts, e.g. `split -l 100000 dump.sql part-` " +
+                "then import each. Copying between two D1 databases with `d1-ferry copy` " +
+                "streams instead and has no such limit.",
+            },
+          );
+        }
+
         const sql = await handle.text();
 
         const payloadBudget = Number(options.fileSize ?? 24 * 1024 * 1024);

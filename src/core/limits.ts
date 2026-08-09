@@ -56,6 +56,17 @@ export const DEFAULTS = {
 } as const;
 
 /**
+ * Largest SQL file `d1-ferry import` will read.
+ *
+ * The importer tokenizes the whole file as a single string to find statement
+ * boundaries safely, so the file must fit in memory. Bun's string allocation fails
+ * around 2 GB -- well under D1's own 5 GiB import ceiling -- so this sits below that
+ * and the command refuses larger files with instructions rather than running out of
+ * memory mid-import.
+ */
+export const MAX_IN_MEMORY_SQL_BYTES = 1024 * 1024 * 1024;
+
+/**
  * Tables that must never be copied. `_cf_KV` is D1's reserved internal table and
  * is not even queryable; the `sqlite_*` tables are SQLite internals.
  */

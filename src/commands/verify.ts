@@ -1,9 +1,8 @@
 import type { Command } from "commander";
 
+import { tableDigest } from "../core/digest.ts";
 import { countRows } from "../core/reader.ts";
 import { introspect } from "../core/schema.ts";
-import { quoteIdent } from "../core/sql.ts";
-import type { TableInfo } from "../core/types.ts";
 import { CliError } from "../util/errors.ts";
 import { buildContext, label, resolve } from "../util/context.ts";
 import { formatCount } from "../util/logger.ts";
@@ -18,7 +17,10 @@ export function registerVerify(program: Command): void {
     .option("-t, --table <names>", "only verify these tables", collect, [])
     .option("-x, --exclude-table <names>", "skip these tables", collect, [])
     .option("--where <clause>", "SQL filter applied to the source side")
-    .option("--checksum", "also compare a per-table content checksum (slower, reads every row)")
+    .option(
+      "--checksum",
+      "also compare an order-independent content digest (reads every row on both sides)",
+    )
     .action(
       async (
         source: string,
@@ -79,13 +81,18 @@ export function registerVerify(program: Command): void {
             : `${targetCount - sourceCount > 0 ? "+" : ""}${targetCount - sourceCount}`;
 
           if (ok && options.checksum) {
-            logger.status(`checksumming ${table.name}…`);
-            const [sourceSum, targetSum] = await Promise.all([
-              checksum(context, sourceRef.databaseId, table, where),
-              checksum(context, targetRef.databaseId, table, undefined),
+            logger.status(`digesting ${table.name} (reads every row on both sides)…`);
+            const [sourceDigest, targetDigest] = await Promise.all([
+              tableDigest(
+                context.client,
+                sourceRef.databaseId,
+                table,
+                where !== undefined ? { where } : {},
+              ),
+              tableDigest(context.client, targetRef.databaseId, table),
             ]);
-            ok = sourceSum === targetSum;
-            note = ok ? "✓ checksum" : "✗ content differs";
+            ok = sourceDigest.digest === targetDigest.digest;
+            note = ok ? `✓ ${sourceDigest.digest}` : "✗ content differs";
           }
 
           if (!ok) mismatches++;
@@ -112,37 +119,6 @@ export function registerVerify(program: Command): void {
         logger.success(`All ${selected.length} tables match.`);
       },
     );
-}
-
-/**
- * Order-independent content checksum for a table.
- *
- * Row counts alone cannot detect corrupted or shifted values, which is exactly the
- * failure mode a transfer tool must rule out. Summing a per-row hash makes the
- * result independent of row order, so it stays valid regardless of how either side
- * happens to lay out its pages.
- */
-async function checksum(
-  context: ReturnType<typeof buildContext>,
-  databaseId: string,
-  table: TableInfo,
-  where: string | undefined,
-): Promise<string> {
-  // Concatenate every column with a separator that cannot appear in the data, so
-  // that ('a','bc') and ('ab','c') hash differently.
-  const concat = table.columns
-    .map((c) => `COALESCE(CAST(${quoteIdent(c.name)} AS TEXT), '\\0')`)
-    .join(" || '\\x1f' || ");
-
-  const filter = where ? ` WHERE ${where}` : "";
-  const sql =
-    `SELECT CAST(COALESCE(SUM(rh), 0) AS TEXT) AS total, CAST(COUNT(*) AS TEXT) AS n FROM (` +
-    `SELECT (ABS(RANDOM()) * 0 + LENGTH(${concat}) + UNICODE(${concat})) AS rh ` +
-    `FROM ${quoteIdent(table.name)}${filter})`;
-
-  const result = await context.client.query<{ total: string; n: string }>(databaseId, sql);
-  const row = result.results[0];
-  return `${row?.total ?? "0"}:${row?.n ?? "0"}`;
 }
 
 function collect(value: string, previous: string[]): string[] {
