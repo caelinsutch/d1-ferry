@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 
 import { CheckpointStore, deriveJobId } from "../core/checkpoint.ts";
-import { introspect, topologicalOrder } from "../core/schema.ts";
+import { introspect, schemaObjectsFor, topologicalOrder } from "../core/schema.ts";
 import { TransferEngine, transferOptionsFrom } from "../core/transfer.ts";
 import type { TableInfo } from "../core/types.ts";
 import { CliError } from "../util/errors.ts";
@@ -113,7 +113,13 @@ export function registerCopy(program: Command): void {
         }
 
         if (options.createSchema && !transferOptions.dryRun) {
-          await createSchema(context, targetRef.databaseId, schema, ordered);
+          await createSchema(
+            context,
+            targetRef.databaseId,
+            schema,
+            ordered,
+            transferOptions.include.length > 0 || transferOptions.exclude.length > 0,
+          );
           logger.success("Schema created on target.");
         }
 
@@ -176,7 +182,7 @@ export function registerCopy(program: Command): void {
         );
 
         if (!transferOptions.dryRun) {
-          logger.info(`Verify with:  d1x verify ${source} ${target}`);
+          logger.info(`Verify with:  d1-ferry verify ${source} ${target}`);
         }
       },
     );
@@ -188,13 +194,21 @@ async function createSchema(
   targetDatabaseId: string,
   schema: Awaited<ReturnType<typeof introspect>>,
   ordered: TableInfo[],
+  filtered: boolean,
 ): Promise<void> {
   const statements: string[] = [];
 
   for (const table of ordered) {
     if (table.ddl) statements.push(addIfNotExists(table.ddl));
   }
-  for (const object of [...schema.indexes, ...schema.views, ...schema.triggers]) {
+  // Only objects belonging to the copied tables: creating an index for a table that
+  // was filtered out fails with "no such table".
+  const objects = schemaObjectsFor(
+    schema,
+    ordered.map((t) => t.name),
+    { filtered },
+  );
+  for (const object of objects) {
     statements.push(addIfNotExists(object.ddl));
   }
 

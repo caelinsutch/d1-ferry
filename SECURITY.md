@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report security issues privately via
-[GitHub Security Advisories](https://github.com/caelinsutch/d1-data-transfer/security/advisories/new)
+[GitHub Security Advisories](https://github.com/caelinsutch/d1-ferry/security/advisories/new)
 rather than opening a public issue.
 
 Expect an initial response within a few days.
@@ -24,9 +24,9 @@ most worth scrutiny are:
   R2 upload URL that D1's import endpoint returns. It is never written to disk.
   Note that a token passed as a CLI flag is visible in your shell history and
   process list; prefer the environment variable.
-- **Checkpoint files.** `.d1x/*.json` records table names, row counts, and cursor
+- **Checkpoint files.** `.d1-ferry/*.json` records table names, row counts, and cursor
   values — the last-seen primary key of each table. Cursors can therefore contain
-  real data. `.d1x/` is gitignored by default; treat it as sensitive.
+  real data. `.d1-ferry/` is gitignored by default; treat it as sensitive.
 
 ## Not vulnerabilities
 

@@ -2,7 +2,7 @@ import type { Command } from "commander";
 
 import { StatementPacker } from "../core/packer.ts";
 import { TableReader } from "../core/reader.ts";
-import { introspect, topologicalOrder } from "../core/schema.ts";
+import { introspect, schemaObjectsFor, topologicalOrder } from "../core/schema.ts";
 import { byteLength } from "../core/sql.ts";
 import type { TableInfo } from "../core/types.ts";
 import { CliError } from "../util/errors.ts";
@@ -26,6 +26,11 @@ export function registerExport(program: Command): void {
       parseSizeOption("statement-size"),
     )
     .option("--page-size <rows>", "rows read per request", parseIntOption("page-size"))
+    .option(
+      "--limit <rows>",
+      "stop after about this many rows per table (for sampling a large table)",
+      parseIntOption("limit"),
+    )
     .action(async (database: string, options: Record<string, unknown>, command: Command) => {
       const context = buildContext(command);
       const { logger } = context;
@@ -70,9 +75,9 @@ export function registerExport(program: Command): void {
 
       try {
         write(
-          `-- d1x export of ${ref.name ?? ref.databaseId}\n` +
+          `-- d1-ferry export of ${ref.name ?? ref.databaseId}\n` +
             `-- generated ${new Date().toISOString()}\n` +
-            "-- Safe to re-import with: d1x import <database> <file>\n" +
+            "-- Safe to re-import with: d1-ferry import <database> <file>\n" +
             "PRAGMA defer_foreign_keys = true;\n\n",
         );
 
@@ -80,7 +85,14 @@ export function registerExport(program: Command): void {
           for (const table of ordered) {
             if (table.ddl) write(`${table.ddl};\n`);
           }
-          for (const object of [...schema.indexes, ...schema.views, ...schema.triggers]) {
+          // Only objects belonging to the exported tables: emitting an index for a
+          // table that was filtered out makes the file fail to import.
+          const objects = schemaObjectsFor(
+            schema,
+            ordered.map((t) => t.name),
+            { filtered: include.length > 0 || exclude.length > 0 },
+          );
+          for (const object of objects) {
             write(`${object.ddl};\n`);
           }
           write("\n");
@@ -92,6 +104,7 @@ export function registerExport(program: Command): void {
 
             const reader = new TableReader(context.client, ref.databaseId, table, {
               ...(options.pageSize !== undefined ? { pageSize: Number(options.pageSize) } : {}),
+              ...(options.limit !== undefined ? { limit: Number(options.limit) } : {}),
               ...(typeof options.where === "string" ? { where: options.where } : {}),
             });
 

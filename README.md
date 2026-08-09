@@ -1,11 +1,11 @@
-# d1x — d1-data-transfer
+# d1-ferry — d1-ferry
 
 Move large amounts of data between [Cloudflare D1](https://developers.cloudflare.com/d1/)
 databases without fighting the platform's limits.
 
 Bulk-loading D1 is harder than it looks. The failure modes people actually hit:
 
-| What bites you                 | Why                                                                                              | What `d1x` does                                                                                                            |
+| What bites you                 | Why                                                                                              | What `d1-ferry` does                                                                                                       |
 | ------------------------------ | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | `Statement too long`           | A single SQL statement may not exceed **100 KB**                                                 | Packs multi-row `INSERT`s to a byte budget, measured in UTF-8 bytes                                                        |
 | Inserts are absurdly slow      | D1 allows only **100 bound parameters per query** — a 10-column table gets 10 rows per statement | Inlines escaped literals instead of binding, so a statement carries hundreds to thousands of rows                          |
@@ -23,7 +23,7 @@ Verified limits and citations live in [`.notes/d1-constraints.md`](.notes/d1-con
 ## Install
 
 ```sh
-bun add -g d1-data-transfer   # or: bun install && bun link
+bun add -g d1-ferry   # or: bun install && bun link
 ```
 
 Requires [Bun](https://bun.sh) 1.1+.
@@ -41,29 +41,29 @@ by **name or UUID**.
 ## Usage
 
 ```sh
-d1x list                                  # list databases
-d1x schema show my-db                     # table/PK/FK overview
-d1x copy prod-db staging-db               # the main event
-d1x verify prod-db staging-db --checksum  # confirm it worked
+d1-ferry list                                  # list databases
+d1-ferry schema show my-db                     # table/PK/FK overview
+d1-ferry copy prod-db staging-db               # the main event
+d1-ferry verify prod-db staging-db --checksum  # confirm it worked
 ```
 
 ### Copy
 
 ```sh
 # Full copy, creating the schema on the target first
-d1x copy prod-db staging-db --create-schema
+d1-ferry copy prod-db staging-db --create-schema
 
 # Only some tables, overwriting rows that already exist
-d1x copy prod-db staging-db -t users,orders --conflict replace
+d1-ferry copy prod-db staging-db -t users,orders --conflict replace
 
 # Copy a subset of rows
-d1x copy prod-db staging-db -t events --where "created_at > '2026-01-01'"
+d1-ferry copy prod-db staging-db -t events --where "created_at > '2026-01-01'"
 
 # See the plan without writing
-d1x copy prod-db staging-db --dry-run
+d1-ferry copy prod-db staging-db --dry-run
 ```
 
-A copy writes a checkpoint to `.d1x/<source>-to-<target>.json` after every confirmed
+A copy writes a checkpoint to `.d1-ferry/<source>-to-<target>.json` after every confirmed
 batch. If it fails, **re-run the same command** and it resumes. Use `--no-resume` to
 start over.
 
@@ -74,12 +74,12 @@ a replayed batch can legitimately hit a primary-key conflict.
 ### Export / import
 
 ```sh
-d1x export prod-db -o backup.sql          # D1 → local .sql
-d1x import staging-db backup.sql          # local .sql → D1
-d1x import staging-db dump.sql --dry-run  # validate chunking only
+d1-ferry export prod-db -o backup.sql          # D1 → local .sql
+d1-ferry import staging-db backup.sql          # local .sql → D1
+d1-ferry import staging-db dump.sql --dry-run  # validate chunking only
 ```
 
-`d1x export` always emits statements that respect the 100 KB limit. `d1x import`
+`d1-ferry export` always emits statements that respect the 100 KB limit. `d1-ferry import`
 accepts any SQL file — including `sqlite3 .dump` output — and automatically strips
 what D1 rejects (`BEGIN`/`COMMIT`, `_cf_KV`, `PRAGMA foreign_keys`). Its statement
 splitter is quote-, comment-, and `BEGIN…END`-aware, so semicolons inside string
@@ -89,39 +89,40 @@ Converting an existing SQLite file:
 
 ```sh
 sqlite3 local.sqlite3 .dump > dump.sql
-d1x import my-db dump.sql
+d1-ferry import my-db dump.sql
 ```
 
 ### Verify
 
 ```sh
-d1x verify prod-db staging-db             # row counts per table
-d1x verify prod-db staging-db --checksum  # order-independent content hash
+d1-ferry verify prod-db staging-db             # row counts per table
+d1-ferry verify prod-db staging-db --checksum  # order-independent content hash
 ```
 
 Exits non-zero on any mismatch, so it drops straight into CI.
 
 ## Key options
 
-| Option                        | Default | Notes                                                  |            |           |
-| ----------------------------- | ------- | ------------------------------------------------------ | ---------- | --------- |
-| `--statement-size <bytes>`    | `92KB`  | Per-`INSERT` budget. Hard ceiling is 100 KB.           |            |           |
-| `--page-size <rows>`          | `1000`  | Rows per read request.                                 |            |           |
-| `--file-size <bytes>`         | `24MB`  | Size of each `/import` payload. Hard ceiling is 5 GiB. |            |           |
-| `--conflict <mode>`           | `error` | `error` \                                              | `ignore` \ | `replace` |
-| `--where <clause>`            | —       | Filter applied to every table.                         |            |           |
-| `-t, --table <names>`         | all     | Repeatable or comma-separated.                         |            |           |
-| `-x, --exclude-table <names>` | —       | Repeatable or comma-separated.                         |            |           |
-| `--no-defer-foreign-keys`     | off     | Disable `PRAGMA defer_foreign_keys`.                   |            |           |
-| `--dry-run`                   | off     | Report without writing.                                |            |           |
-| `--json`                      | off     | Newline-delimited JSON logs.                           |            |           |
+| Option                        | Default | Notes                                                  |
+| ----------------------------- | ------- | ------------------------------------------------------ |
+| `--statement-size <bytes>`    | `92KB`  | Per-`INSERT` budget. Hard ceiling is 100 KB.           |
+| `--page-size <rows>`          | `1000`  | Rows per read request.                                 |
+| `--file-size <bytes>`         | `24MB`  | Size of each `/import` payload. Hard ceiling is 5 GiB. |
+| `--conflict <mode>`           | `error` | One of `error`, `ignore`, `replace`.                   |
+| `--where <clause>`            | —       | Filter applied to every table.                         |
+| `-t, --table <names>`         | all     | Repeatable or comma-separated.                         |
+| `-x, --exclude-table <names>` | —       | Repeatable or comma-separated.                         |
+| `--limit <rows>`              | —       | `export` only. Sample roughly N rows per table.        |
+| `--no-defer-foreign-keys`     | off     | Disable `PRAGMA defer_foreign_keys`.                   |
+| `--dry-run`                   | off     | Report without writing.                                |
+| `--json`                      | off     | Newline-delimited JSON logs.                           |
 
 Sizes accept suffixes: `92000`, `64KB`, `24MB`, `1GB`.
 
 ## Known limitations
 
 - **Virtual (FTS5) tables are not copied.** D1 cannot export them, and their shadow
-  tables must not be copied directly. `d1x` detects, skips, and warns about them;
+  tables must not be copied directly. `d1-ferry` detects, skips, and warns about them;
   recreate the `CREATE VIRTUAL TABLE` and repopulate from its content table.
 - **`WITHOUT ROWID` tables need a primary key** to be paged and resumed. Ordinary
   tables page on `rowid`, which is always present, unique, and non-NULL.
@@ -135,7 +136,7 @@ Sizes accept suffixes: `92000`, `64KB`, `24MB`, `1GB`.
 ## Library use
 
 ```ts
-import { D1Client, StatementPacker, introspect } from "d1-data-transfer";
+import { D1Client, StatementPacker, introspect } from "d1-ferry";
 
 const client = new D1Client({ accountId, apiToken });
 const schema = await introspect(client, databaseId);
@@ -160,7 +161,7 @@ bun run typecheck     # tsc --noEmit
 bun run lint          # oxlint
 bun run format        # oxfmt --write
 bun run check         # all of the above
-bun run build         # single-file binary at dist/d1x
+bun run build         # single-file binary at dist/d1-ferry
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -1,46 +1,57 @@
 {
-  "name": "d1-data-transfer",
+  "name": "d1-ferry",
   "version": "0.1.0",
-  "description": "CLI for transferring large amounts of data between Cloudflare D1 databases without hitting statement, parameter, or duration limits",
+  "description": "Move large amounts of data between Cloudflare D1 databases without hitting statement, parameter, or duration limits",
   "keywords": [
     "bulk-insert",
     "bun",
     "cli",
     "cloudflare",
     "d1",
+    "data-transfer",
     "database",
     "etl",
     "migration",
     "sqlite"
   ],
-  "homepage": "https://github.com/caelinsutch/d1-data-transfer#readme",
+  "homepage": "https://github.com/caelinsutch/d1-ferry#readme",
   "bugs": {
-    "url": "https://github.com/caelinsutch/d1-data-transfer/issues"
+    "url": "https://github.com/caelinsutch/d1-ferry/issues"
   },
   "license": "Apache-2.0",
   "author": "Caelin Sutch",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/caelinsutch/d1-data-transfer.git"
+    "url": "git+https://github.com/caelinsutch/d1-ferry.git"
   },
   "bin": {
-    "d1x": "./dist/d1x"
+    "d1-ferry": "./bin/d1-ferry.ts",
+    "d1f": "./bin/d1-ferry.ts"
   },
   "files": [
+    "bin",
     "src",
+    "!src/**/*.test.ts",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
   ],
   "type": "module",
+  "sideEffects": false,
   "module": "src/index.ts",
+  "types": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
-    "dev": "bun run src/cli.ts",
-    "build": "bun build src/cli.ts --compile --minify --sourcemap --target=bun --outfile dist/d1x",
-    "build:js": "bun build src/cli.ts --target=bun --outdir dist",
+    "dev": "bun run bin/d1-ferry.ts",
+    "build": "bun build bin/d1-ferry.ts --compile --minify --sourcemap --target=bun --outfile dist/d1-ferry",
+    "build:js": "bun build bin/d1-ferry.ts --target=bun --outdir dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",

@@ -108,8 +108,8 @@ export function registerImport(program: Command): void {
               `Statement ${statementCount + 1} exceeds D1's 100KB statement limit.`,
               {
                 hint:
-                  "Regenerate the dump with smaller INSERT batches. `d1x export` always produces " +
-                  "compliant statements, as does `d1x copy`.",
+                  "Regenerate the dump with smaller INSERT batches. `d1-ferry export` always produces " +
+                  "compliant statements, as does `d1-ferry copy`.",
               },
             );
           }

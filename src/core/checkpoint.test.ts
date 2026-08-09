@@ -8,7 +8,7 @@ import { CheckpointStore, deriveJobId, type Manifest } from "./checkpoint.ts";
 const created: string[] = [];
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "d1x-checkpoint-"));
+  const dir = await mkdtemp(join(tmpdir(), "d1-ferry-checkpoint-"));
   created.push(dir);
   return dir;
 }

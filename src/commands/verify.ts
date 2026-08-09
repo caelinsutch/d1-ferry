@@ -105,7 +105,7 @@ export function registerVerify(program: Command): void {
 
         if (mismatches > 0) {
           throw new CliError(`${mismatches} of ${selected.length} tables do not match.`, {
-            hint: "Re-run `d1x copy` to fill gaps, or use --conflict replace to overwrite rows.",
+            hint: "Re-run `d1-ferry copy` to fill gaps, or use --conflict replace to overwrite rows.",
           });
         }
 

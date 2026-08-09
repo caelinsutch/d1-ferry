@@ -203,6 +203,29 @@ export function topologicalOrder(tables: TableInfo[]): {
 }
 
 /**
+ * Select the schema objects that belong to a given set of tables.
+ *
+ * Without this, `export -t one_table` emits every index in the database, including
+ * indexes on tables it did not export, and the resulting file fails to import with
+ * "no such table". Views are only included when nothing was filtered out, because a
+ * view can reference any table and we cannot know its dependencies from `sqlite_master`
+ * alone.
+ */
+export function schemaObjectsFor(
+  schema: DatabaseSchema,
+  tableNames: Iterable<string>,
+  options: { filtered: boolean },
+): Array<{ name: string; ddl: string }> {
+  const selected = new Set(tableNames);
+
+  return [
+    ...schema.indexes.filter((i) => selected.has(i.table)),
+    ...schema.triggers.filter((t) => selected.has(t.table)),
+    ...(options.filtered ? [] : schema.views),
+  ];
+}
+
+/**
  * Build the SELECT projection for reading a table without losing data.
  *
  * Every value is transported with a `typeof()` tag, because SQLite storage classes

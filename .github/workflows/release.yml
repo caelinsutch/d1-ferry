@@ -90,16 +90,16 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts
-          if [ -f dist/d1x.exe ]; then
-            mv dist/d1x.exe "artifacts/d1x-${{ matrix.target }}.exe"
+          if [ -f dist/d1-ferry.exe ]; then
+            mv dist/d1-ferry.exe "artifacts/d1-ferry-${{ matrix.target }}.exe"
           else
-            mv dist/d1x "artifacts/d1x-${{ matrix.target }}"
+            mv dist/d1-ferry "artifacts/d1-ferry-${{ matrix.target }}"
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: d1x-${{ matrix.target }}
+          name: d1-ferry-${{ matrix.target }}
           path: artifacts/*
           if-no-files-found: error
 

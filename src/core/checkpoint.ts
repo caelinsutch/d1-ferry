@@ -50,7 +50,7 @@ export class CheckpointStore {
 
   /** Directory where manifests live, relative to the working directory. */
   static defaultDir(): string {
-    return join(process.cwd(), ".d1x");
+    return join(process.cwd(), ".d1-ferry");
   }
 
   static pathFor(jobId: string, dir = CheckpointStore.defaultDir()): string {

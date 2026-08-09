@@ -72,6 +72,6 @@ jobs:
       - name: Smoke test the binary
         shell: bash
         run: |
-          ./dist/d1x --version
-          ./dist/d1x --help
-          ./dist/d1x copy --help
+          ./dist/d1-ferry --version
+          ./dist/d1-ferry --help
+          ./dist/d1-ferry copy --help

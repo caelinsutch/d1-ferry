@@ -21,7 +21,7 @@ linting and formatting.
 | `bun run lint`          | `oxlint`                                            |
 | `bun run format`        | `oxfmt --write .`                                   |
 | `bun run check`         | Everything CI runs                                  |
-| `bun run build`         | Single-file binary at `dist/d1x`                    |
+| `bun run build`         | Single-file binary at `dist/d1-ferry`               |
 
 ## Working on this safely
 

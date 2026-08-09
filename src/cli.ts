@@ -16,7 +16,7 @@ function buildProgram(): Command {
   const program = new Command();
 
   program
-    .name("d1x")
+    .name("d1-ferry")
     .description(
       "Transfer large amounts of data between Cloudflare D1 databases without tripping over statement-size, batch, and duration limits.",
     )
@@ -53,7 +53,13 @@ function buildProgram(): Command {
   return program;
 }
 
-async function main(argv: string[]): Promise<void> {
+/**
+ * Parse and execute a command line.
+ *
+ * Exported rather than self-executing so the published `bin` shim owns the decision
+ * to run, which keeps importing this module side-effect free.
+ */
+export async function run(argv: string[] = process.argv): Promise<void> {
   try {
     await buildProgram().parseAsync(argv);
   } catch (error) {
@@ -86,5 +92,3 @@ function isCommanderExit(error: unknown): boolean {
     (error as { code: string }).code.startsWith("commander.")
   );
 }
-
-await main(process.argv);

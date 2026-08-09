@@ -1,0 +1,22 @@
+# Markdown lint configuration.
+#
+# Tables and code blocks are exempt from the line-length rule: a comparison table with
+# real prose in its cells cannot wrap, and hard-wrapping fenced code changes its meaning.
+default: true
+
+MD013:
+  line_length: 100
+  tables: false
+  code_blocks: false
+  headings: true
+
+# Allow inline HTML (badges, details/summary blocks).
+MD033: false
+
+# The document title comes from the H1; duplicate sibling headings are fine across
+# sections (e.g. repeated "Fixed"/"Added" under different releases in CHANGELOG).
+MD024:
+  siblings_only: true
+
+# Bare URLs are intentional in a few places (verification links).
+MD034: false
