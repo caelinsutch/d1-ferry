@@ -1,0 +1,68 @@
+{
+  "name": "d1-data-transfer",
+  "version": "0.1.0",
+  "description": "CLI for transferring large amounts of data between Cloudflare D1 databases without hitting statement, parameter, or duration limits",
+  "keywords": [
+    "bulk-insert",
+    "bun",
+    "cli",
+    "cloudflare",
+    "d1",
+    "database",
+    "etl",
+    "migration",
+    "sqlite"
+  ],
+  "homepage": "https://github.com/caelinsutch/d1-data-transfer#readme",
+  "bugs": {
+    "url": "https://github.com/caelinsutch/d1-data-transfer/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "Caelin Sutch",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caelinsutch/d1-data-transfer.git"
+  },
+  "bin": {
+    "d1x": "./dist/d1x"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "type": "module",
+  "module": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build src/cli.ts --compile --minify --sourcemap --target=bun --outfile dist/d1x",
+    "build:js": "bun build src/cli.ts --target=bun --outdir dist",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun test",
+    "prepublishOnly": "bun run check"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.2",
+    "oxfmt": "^0.62.0",
+    "oxlint": "^1.77.0",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}

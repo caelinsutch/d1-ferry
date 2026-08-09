@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+!.env.example
+.d1x/
+*.sqlite
+*.sqlite3
+*.db
+.DS_Store
+.notes/d1-llms.txt
+
+# Agent/session scratch state
+.pi/
+.pi-subagents/

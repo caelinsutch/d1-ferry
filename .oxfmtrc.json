@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxfmt/configuration_schema.json",
+  "lineWidth": 100,
+  "indentWidth": 2,
+  "indentStyle": "space",
+  "quoteStyle": "double",
+  "semicolons": "always",
+  "trailingComma": "all",
+  "arrowParentheses": "always",
+  "bracketSpacing": true,
+  "objectWrap": "preserve"
+}
