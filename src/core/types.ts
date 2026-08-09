@@ -1,5 +1,15 @@
+/**
+ * A pre-formatted SQL fragment emitted verbatim instead of being quoted.
+ *
+ * Used for values that cannot survive inlining as a plain literal -- notably TEXT
+ * containing a NUL byte, which SQLite truncates at the NUL.
+ */
+export interface RawSql {
+  readonly sql: string;
+}
+
 /** A value as it can appear in a SQLite column. */
-export type SqlValue = string | number | bigint | boolean | null | Uint8Array;
+export type SqlValue = string | number | bigint | boolean | null | Uint8Array | RawSql;
 
 /** SQLite storage classes, as resolved from a declared column type. */
 export type StorageClass = "INTEGER" | "REAL" | "TEXT" | "BLOB" | "NUMERIC";

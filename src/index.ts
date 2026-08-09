@@ -30,10 +30,14 @@ export { isUnsupportedStatement, splitStatements } from "./core/splitter.ts";
 export {
   affinityOf,
   byteLength,
+  decodeHex,
+  decodeTransported,
   encodeBlob,
   encodeLiteral,
+  isRawSql,
   quoteIdent,
   quoteString,
+  rawSql,
 } from "./core/sql.ts";
 
 export { TransferEngine, transferOptionsFrom } from "./core/transfer.ts";
@@ -45,6 +49,7 @@ export type {
   DatabaseRef,
   DatabaseSchema,
   ForeignKeyInfo,
+  RawSql,
   RowPage,
   SqlValue,
   StorageClass,

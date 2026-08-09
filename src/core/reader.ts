@@ -1,7 +1,7 @@
 import type { D1Client } from "./client.ts";
 import { DEFAULTS } from "./limits.ts";
 import { paginationKey, readProjection } from "./schema.ts";
-import { encodeLiteral, quoteIdent } from "./sql.ts";
+import { decodeTransported, encodeLiteral, quoteIdent } from "./sql.ts";
 import type { SqlValue, TableInfo } from "./types.ts";
 
 export interface ReadOptions {
@@ -41,7 +41,6 @@ export interface ReadPage {
 export class TableReader {
   private readonly projection: string;
   private readonly keyColumns: string[];
-  private readonly keyIsRowid: boolean;
   private cursor: KeysetCursor | null;
   private exhausted = false;
   private rowsRead = 0;
@@ -53,15 +52,16 @@ export class TableReader {
     private readonly options: ReadOptions = {},
   ) {
     this.keyColumns = paginationKey(table);
-    this.keyIsRowid = this.keyColumns.length === 1 && this.keyColumns[0] === "rowid";
     this.cursor = options.cursor ?? null;
 
-    const dataProjection = readProjection(table.columns);
-    // The key columns must come back with the page so we can build the next cursor,
-    // even when they are not part of the copied column set (i.e. rowid).
-    this.projection = this.keyIsRowid
-      ? `CAST(rowid AS TEXT) AS "__cursor_rowid", ${dataProjection}`
-      : dataProjection;
+    // Cursor columns are projected separately and UNTAGGED. Data columns carry a
+    // typeof() tag for fidelity, but a tagged value ('t:acme') could not be compared
+    // against the raw column in the seek predicate, so the key needs a plain copy.
+    const cursorProjection = this.keyColumns
+      .map((name, i) => `CAST(${columnRef(name)} AS TEXT) AS "__cursor_${i}"`)
+      .join(", ");
+
+    this.projection = `${cursorProjection}, ${readProjection(table.columns)}`;
   }
 
   /** Column names of the copied data, excluding any synthetic cursor column. */
@@ -144,30 +144,29 @@ export class TableReader {
     return `(${clauses.map((c) => `(${c})`).join(" OR ")})`;
   }
 
-  /** Strip the synthetic rowid cursor column back out of the result set. */
+  /**
+   * Split the synthetic cursor columns off the front of the result set and decode
+   * the tagged data values back into typed JS values.
+   */
   private splitCursorColumn(
     columns: string[],
     rows: SqlValue[][],
   ): { columns: string[]; rows: SqlValue[][]; cursor: KeysetCursor } {
+    const keyCount = this.keyColumns.length;
     const lastRow = rows.at(-1) as SqlValue[];
 
-    if (this.keyIsRowid) {
-      const cursorIndex = columns.indexOf("__cursor_rowid");
-      const dataColumns = columns.filter((_, i) => i !== cursorIndex);
-      const dataRows = rows.map((row) => row.filter((_, i) => i !== cursorIndex));
+    // The cursor columns are always projected first, so they occupy [0, keyCount).
+    const dataColumns = columns.slice(keyCount);
+    const dataRows = rows.map((row) => row.slice(keyCount).map((v) => decodeTransported(v)));
 
-      return {
-        columns: dataColumns,
-        rows: dataRows,
-        cursor: {
-          columns: ["rowid"],
-          values: [lastRow[cursorIndex] as SqlValue],
-        },
-      };
-    }
-
-    const values = this.keyColumns.map((key) => lastRow[columns.indexOf(key)] as SqlValue);
-    return { columns, rows, cursor: { columns: this.keyColumns, values } };
+    return {
+      columns: dataColumns,
+      rows: dataRows,
+      cursor: {
+        columns: this.keyColumns,
+        values: lastRow.slice(0, keyCount),
+      },
+    };
   }
 }
 

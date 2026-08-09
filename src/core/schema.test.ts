@@ -129,47 +129,64 @@ describe("topologicalOrder", () => {
 });
 
 describe("readProjection", () => {
-  it("casts INTEGER columns to TEXT to protect int64 precision", () => {
-    const projection = readProjection([column("id", "INTEGER")]);
-    expect(projection).toBe('CAST("id" AS TEXT) AS "id"');
-  });
-
-  it("hex-encodes BLOBs while preserving NULL", () => {
+  it("tags every value with its storage class, not the declared affinity", () => {
+    // SQLite types are per-value: a BLOB column can hold text. Tagging on typeof()
+    // is what keeps a blob from being restored as its hex text.
     const projection = readProjection([column("data", "BLOB")]);
-    expect(projection).toBe('CASE WHEN "data" IS NULL THEN NULL ELSE hex("data") END AS "data"');
+
+    expect(projection).toContain('CASE typeof("data")');
+    expect(projection).toContain("WHEN 'blob' THEN 'b:' || hex(\"data\")");
+    expect(projection).toContain("WHEN 'null' THEN NULL");
+    expect(projection).toContain('AS "data"');
   });
 
-  it("passes TEXT and REAL through untouched", () => {
-    expect(readProjection([column("name", "TEXT")])).toBe('"name"');
-    expect(readProjection([column("score", "REAL")])).toBe('"score"');
+  it("transports integers as exact text to survive JSON", () => {
+    expect(readProjection([column("id", "INTEGER")])).toContain(
+      "WHEN 'integer' THEN 'i:' || CAST(\"id\" AS TEXT)",
+    );
+  });
+
+  it("leaves REAL as a JSON number, which round-trips a float64 exactly", () => {
+    expect(readProjection([column("score", "REAL")])).toContain("WHEN 'real' THEN \"score\"");
+  });
+
+  it("hex-encodes text containing a NUL byte, which SQLite would truncate at", () => {
+    const projection = readProjection([column("body", "TEXT")]);
+
+    expect(projection).toContain('instr("body", char(0)) > 0');
+    expect(projection).toContain("'x:' || hex(\"body\")");
+    expect(projection).toContain("'t:' || \"body\"");
   });
 
   it("quotes identifiers that need escaping", () => {
-    expect(readProjection([column('we"ird', "TEXT")])).toBe('"we""ird"');
+    expect(readProjection([column('we"ird', "TEXT")])).toContain('typeof("we""ird")');
   });
 
   it("joins multiple columns in declaration order", () => {
     const projection = readProjection([column("id", "INTEGER"), column("name", "TEXT")]);
-    expect(projection).toBe('CAST("id" AS TEXT) AS "id", "name"');
+    expect(projection.indexOf('AS "id"')).toBeLessThan(projection.indexOf('AS "name"'));
   });
 });
 
 describe("paginationKey", () => {
-  it("uses the primary key when one exists", () => {
-    const t = table("users", { columns: [column("id", "INTEGER", 1), column("name")] });
-    expect(paginationKey(t)).toEqual(["id"]);
+  it("prefers rowid, which is unique and never NULL", () => {
+    // A declared TEXT PRIMARY KEY may contain NULL on an ordinary table, and
+    // `col > NULL` matches nothing, which silently ends pagination early.
+    const t = table("users", { columns: [column("id", "TEXT", 1), column("name")] });
+    expect(paginationKey(t)).toEqual(["rowid"]);
   });
 
-  it("orders a composite key by its declared position", () => {
-    const t = table("memberships", {
-      columns: [column("b", "TEXT", 2), column("a", "TEXT", 1), column("x")],
-    });
-    expect(paginationKey(t)).toEqual(["a", "b"]);
-  });
-
-  it("falls back to rowid when there is no primary key", () => {
+  it("uses rowid even when there is no primary key", () => {
     const t = table("logs", { columns: [column("message")] });
     expect(paginationKey(t)).toEqual(["rowid"]);
+  });
+
+  it("uses the primary key for WITHOUT ROWID tables, where it is NOT NULL", () => {
+    const t = table("memberships", {
+      columns: [column("b", "TEXT", 2), column("a", "TEXT", 1), column("x")],
+      withoutRowid: true,
+    });
+    expect(paginationKey(t)).toEqual(["a", "b"]);
   });
 
   it("refuses a WITHOUT ROWID table that has no primary key", () => {

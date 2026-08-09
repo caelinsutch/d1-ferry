@@ -1,4 +1,4 @@
-import type { SqlValue, StorageClass } from "./types.ts";
+import type { RawSql, SqlValue, StorageClass } from "./types.ts";
 
 /**
  * Quote an identifier (table or column name) for safe interpolation.
@@ -38,6 +38,16 @@ const INTEGER_TEXT = /^-?\d+$/;
 /** Matches a string that is exactly a decimal/exponent float. */
 const REAL_TEXT = /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
 
+/** Wrap a pre-formatted SQL fragment so {@link encodeLiteral} emits it verbatim. */
+export function rawSql(sql: string): RawSql {
+  return { sql };
+}
+
+/** Whether a value is a {@link RawSql} marker. */
+export function isRawSql(value: unknown): value is RawSql {
+  return typeof value === "object" && value !== null && typeof (value as RawSql).sql === "string";
+}
+
 /**
  * Encode one value as a SQL literal.
  *
@@ -49,6 +59,8 @@ const REAL_TEXT = /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
 export function encodeLiteral(value: SqlValue, affinity?: StorageClass): string {
   if (value === null || value === undefined) return "NULL";
 
+  if (isRawSql(value)) return value.sql;
+
   if (typeof value === "bigint") return value.toString();
 
   if (typeof value === "boolean") return value ? "1" : "0";
@@ -59,13 +71,26 @@ export function encodeLiteral(value: SqlValue, affinity?: StorageClass): string 
       return value > 0 ? "9e999" : "-9e999"; // Round-trips to Infinity in SQLite.
     }
     if (Number.isInteger(value) && !Object.is(value, -0)) {
-      if (!Number.isSafeInteger(value)) {
+      if (Number.isSafeInteger(value)) return value.toString();
+
+      // An integral float64 beyond 2^53. Every float64 of this magnitude is
+      // mathematically an integer, so `Number.isInteger` is true for values like
+      // 1.8e308 that are plainly REALs -- treating them as integers would reject
+      // legitimate data.
+      //
+      // The column's affinity disambiguates. INTEGER columns are transported as
+      // exact text and arrive here as BigInt, so an unsafe *number* against an
+      // INTEGER column means precision was already lost upstream; refuse it rather
+      // than write a wrong value. Anything else is a REAL that happens to be
+      // integral, and is emitted as one.
+      if (affinity === "INTEGER") {
         throw new Error(
-          `Integer ${value} exceeds JavaScript's safe range and would be corrupted. ` +
-            "Read this column as TEXT (see readers.ts) so its exact value survives JSON.",
+          `Integer ${value} exceeds JavaScript's safe range and has already lost ` +
+            "precision. Transport INTEGER columns as text (see readProjection) so the " +
+            "exact value survives JSON.",
         );
       }
-      return value.toString();
+      return formatReal(value);
     }
     return formatReal(value);
   }
@@ -77,7 +102,67 @@ export function encodeLiteral(value: SqlValue, affinity?: StorageClass): string 
   if (affinity === "INTEGER" && INTEGER_TEXT.test(value)) return value;
   if (affinity === "REAL" && REAL_TEXT.test(value)) return value;
 
+  // A NUL byte truncates the value at SQLite's parser, silently dropping everything
+  // after it, so route such text through a hex blob cast instead of a literal.
+  if (value.includes("\u0000")) {
+    return `CAST(${encodeBlob(Buffer.from(value, "utf8"))} AS TEXT)`;
+  }
+
   return quoteString(value);
+}
+
+/** Tag prefixes emitted by `readProjection` and consumed by {@link decodeTransported}. */
+const TRANSPORT_TAGS = {
+  text: "t:",
+  hexText: "x:",
+  blob: "b:",
+  integer: "i:",
+  real: "r:",
+} as const;
+
+/**
+ * Decode a tagged value read from a source database back into a typed JS value.
+ *
+ * SQLite storage classes are per-value, not per-column: a BLOB-affinity column may
+ * legally hold text or integers. `readProjection` therefore transports a `typeof()`
+ * tag with the data so the original class is restored exactly, instead of being
+ * guessed from the column's declared affinity -- guessing is what silently turned
+ * every BLOB into its hex text.
+ */
+export function decodeTransported(value: SqlValue): SqlValue {
+  if (typeof value !== "string" || value.length < 2) return value;
+
+  const body = value.slice(2);
+
+  switch (value.slice(0, 2)) {
+    case TRANSPORT_TAGS.text:
+      return body;
+    case TRANSPORT_TAGS.blob:
+      return decodeHex(body);
+    case TRANSPORT_TAGS.hexText:
+      // Text that cannot travel as a literal (embedded NUL); restore it as text.
+      return rawSql(`CAST(X'${body.toLowerCase()}' AS TEXT)`);
+    case TRANSPORT_TAGS.integer:
+      // Exact int64 via BigInt, so nothing is lost to float precision.
+      return INTEGER_TEXT.test(body) ? BigInt(body) : body;
+    case TRANSPORT_TAGS.real:
+      return REAL_TEXT.test(body) ? Number(body) : body;
+    default:
+      return value;
+  }
+}
+
+/** Decode a hex string into bytes. */
+export function decodeHex(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0 || /[^0-9a-f]/iu.test(hex)) {
+    throw new Error(`Malformed hex payload: ${hex.slice(0, 32)} (length ${hex.length}).`);
+  }
+
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
 }
 
 /** Format a float so it reparses to the identical double. */

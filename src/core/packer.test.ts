@@ -40,8 +40,15 @@ describe("encodeLiteral", () => {
     expect(encodeLiteral("-9223372036854775808", "INTEGER")).toBe("-9223372036854775808");
   });
 
-  it("refuses to silently corrupt an unsafe integer supplied as a number", () => {
-    expect(() => encodeLiteral(2 ** 53 + 1)).toThrow(/exceeds JavaScript's safe range/);
+  it("refuses an unsafe integer against an INTEGER column, where it means lost precision", () => {
+    expect(() => encodeLiteral(2 ** 53 + 1, "INTEGER")).toThrow(/already lost/);
+  });
+
+  it("accepts a large REAL that happens to be integral", () => {
+    // Every float64 of this magnitude is mathematically an integer, so a naive
+    // Number.isInteger check would reject legitimate REAL data.
+    expect(encodeLiteral(1.7976931348623157e308, "REAL")).toBe("1.7976931348623157e+308");
+    expect(encodeLiteral(1e20, "REAL")).toBe("100000000000000000000.0");
   });
 
   it("handles bigint exactly", () => {

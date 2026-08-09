@@ -205,50 +205,65 @@ export function topologicalOrder(tables: TableInfo[]): {
 /**
  * Build the SELECT projection for reading a table without losing data.
  *
- * INTEGER columns are cast to TEXT because D1 returns JSON, and JSON numbers pass
- * through JavaScript's 53-bit float precision — an int64 read as a number is
- * silently truncated. Cloudflare documents this for `d1 export`, and it applies
- * equally to `/query` and `/raw`. Reading the digits as text and re-emitting them
- * as a bare numeric literal is the only way to guarantee a faithful copy.
+ * Every value is transported with a `typeof()` tag, because SQLite storage classes
+ * are per-value rather than per-column: a BLOB-affinity column may legally hold
+ * text, and an INTEGER column may hold a string. Inferring the class from the
+ * declared affinity is what silently rewrote every BLOB as its hex text.
  *
- * BLOBs come back as JSON arrays of byte values, which is correct but verbose;
- * `hex()` is more compact and unambiguous.
+ * Per storage class:
+ * - `integer` travels as exact decimal text, because D1 returns JSON and JSON
+ *   numbers pass through JavaScript's 53-bit floats, so an int64 read as a number is
+ *   silently truncated. Cloudflare documents this for `d1 export`.
+ * - `real` travels as a JSON number, which round-trips a float64 exactly and avoids
+ *   SQLite's lossy default real-to-text conversion.
+ * - `blob` travels as hex.
+ * - `text` travels as-is, unless it contains a NUL byte, which SQLite truncates at;
+ *   that case travels as hex and is restored with a cast.
  */
 export function readProjection(columns: ColumnInfo[]): string {
-  return columns
-    .map((column) => {
-      const ident = quoteIdent(column.name);
-      switch (column.affinity) {
-        case "INTEGER":
-          return `CAST(${ident} AS TEXT) AS ${ident}`;
-        case "BLOB":
-          // NULL must stay NULL: hex(NULL) returns '' rather than NULL.
-          return `CASE WHEN ${ident} IS NULL THEN NULL ELSE hex(${ident}) END AS ${ident}`;
-        default:
-          return ident;
-      }
-    })
-    .join(", ");
+  return columns.map((column) => taggedValue(quoteIdent(column.name))).join(", ");
+}
+
+/** Tagged transport expression for one column reference. */
+function taggedValue(ident: string): string {
+  return (
+    `CASE typeof(${ident})` +
+    " WHEN 'null' THEN NULL" +
+    ` WHEN 'real' THEN ${ident}` +
+    ` WHEN 'integer' THEN 'i:' || CAST(${ident} AS TEXT)` +
+    ` WHEN 'blob' THEN 'b:' || hex(${ident})` +
+    ` ELSE CASE WHEN instr(${ident}, char(0)) > 0` +
+    ` THEN 'x:' || hex(${ident})` +
+    ` ELSE 't:' || ${ident} END` +
+    ` END AS ${ident}`
+  );
 }
 
 /**
- * Columns suitable for keyset pagination, preferring the declared primary key.
+ * Columns suitable for keyset pagination.
  *
- * Returns `["rowid"]` for ordinary tables with no usable primary key. WITHOUT ROWID
- * tables have no rowid at all, so a primary key is mandatory there.
+ * Prefers `rowid`, which is always unique and NOT NULL. A declared PRIMARY KEY is
+ * deliberately not preferred: SQLite only enforces NOT NULL on primary keys for
+ * `WITHOUT ROWID` and `STRICT` tables, so an ordinary table's `TEXT PRIMARY KEY` can
+ * contain NULL. That breaks seek pagination silently, because `col > NULL` matches
+ * nothing: the reader sees an empty page, concludes the table is exhausted, and
+ * reports success having copied only part of it.
+ *
+ * `WITHOUT ROWID` tables have no rowid, but their primary keys are guaranteed NOT
+ * NULL, so paging on the declared key is safe there.
  */
 export function paginationKey(table: TableInfo): string[] {
+  if (!table.withoutRowid) return ["rowid"];
+
   const pk = table.columns
     .filter((c) => c.pkPosition > 0)
     .toSorted((a, b) => a.pkPosition - b.pkPosition)
     .map((c) => c.name);
 
   if (pk.length > 0) return pk;
-  if (table.withoutRowid) {
-    throw new Error(
-      `Table "${table.name}" is WITHOUT ROWID and has no primary key, so it cannot be ` +
-        "paged deterministically. Copy it with --no-resume to read it in a single pass.",
-    );
-  }
-  return ["rowid"];
+
+  throw new Error(
+    `Table "${table.name}" is WITHOUT ROWID and has no primary key, so it cannot be ` +
+      "paged deterministically.",
+  );
 }
