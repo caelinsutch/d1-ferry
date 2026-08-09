@@ -163,13 +163,26 @@ export function registerCopy(program: Command): void {
             totalBytes += result.bytesSent;
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            await checkpoints?.fail(table.name, message);
             logger.clearStatus();
 
+            // Recording the failure must never mask the failure itself.
+            let saved = Boolean(checkpoints);
+            try {
+              await checkpoints?.fail(table.name, message);
+            } catch (checkpointError) {
+              saved = false;
+              logger.warn(
+                "Could not write the checkpoint: " +
+                  (checkpointError instanceof Error
+                    ? checkpointError.message
+                    : String(checkpointError)),
+              );
+            }
+
             throw new CliError(`Copy failed on table "${table.name}": ${message}`, {
-              hint: checkpoints
-                ? `Progress was saved. Re-run the same command to resume from where it stopped.`
-                : "Re-run with resume enabled (omit --no-resume) to make failures recoverable.",
+              hint: saved
+                ? "Progress was saved. Re-run the same command to resume from where it stopped."
+                : "Progress was not saved, so a re-run starts this table over.",
               cause: error,
             });
           }

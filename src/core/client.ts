@@ -52,6 +52,25 @@ export interface ImportProgress {
 }
 
 /**
+ * Response shape shared by the `init`, `ingest`, and `poll` import actions.
+ *
+ * The three actions return overlapping but not identical payloads, and `init` in
+ * particular returns either an upload URL or an already-completed import, so a single
+ * permissive shape is more honest than pretending each phase has a fixed schema.
+ */
+interface ImportPhaseResult {
+  success?: boolean;
+  filename?: string;
+  upload_url?: string;
+  at_bookmark?: string;
+  status?: string;
+  error?: string;
+  messages?: string[];
+  result?: { meta?: D1Meta; final_bookmark?: string; num_queries?: number };
+  meta?: D1Meta;
+}
+
+/**
  * Client for the Cloudflare D1 REST API.
  *
  * Covers the three endpoints that matter for bulk transfer:
@@ -162,14 +181,34 @@ export class D1Client {
     const etag = new Bun.CryptoHasher("md5").update(sql).digest("hex");
 
     progress.onPhase?.("init");
-    const init = await this.request<{ upload_url: string; filename: string }>(url, {
+    const init = await this.request<ImportPhaseResult>(url, {
       method: "POST",
       body: JSON.stringify({ action: "init", etag }),
     });
 
+    // D1 short-circuits when this exact payload has already been ingested: `init`
+    // returns the finished import (status/at_bookmark) instead of an upload URL. That
+    // makes re-running an identical import a no-op, which is what a resumable tool
+    // replaying its last in-flight batch depends on.
+    if (!init.upload_url) {
+      if (init.error) {
+        throw new D1ApiError(`Import init failed: ${init.error}`, { status: 200 });
+      }
+      if (init.at_bookmark || init.status === "complete") {
+        progress.onPhase?.("done");
+        return init.result?.meta ?? init.meta ?? {};
+      }
+      throw new D1ApiError("Import init returned neither an upload URL nor a completed import.", {
+        status: 200,
+        hint: "This is unexpected from the D1 API; retrying the copy is usually enough.",
+      });
+    }
+
+    const uploadUrl = init.upload_url;
+
     progress.onPhase?.("upload");
     const uploaded = await this.withRetry("import upload", async () => {
-      const response = await this.fetchImpl(init.upload_url, {
+      const response = await this.fetchImpl(uploadUrl, {
         method: "PUT",
         body: sql,
       });
@@ -193,17 +232,16 @@ export class D1Client {
     }
 
     progress.onPhase?.("ingest");
-    const ingest = await this.request<{
-      at_bookmark?: string;
-      success?: boolean;
-      meta?: D1Meta;
-    }>(url, {
+    const ingest = await this.request<ImportPhaseResult>(url, {
       method: "POST",
       body: JSON.stringify({ action: "ingest", etag, filename: init.filename }),
     });
 
+    if (ingest.error) {
+      throw new D1ApiError(`Import ingest failed: ${ingest.error}`, { status: 200 });
+    }
     if (!ingest.at_bookmark) {
-      return ingest.meta ?? {};
+      return ingest.result?.meta ?? ingest.meta ?? {};
     }
 
     progress.onPhase?.("poll");
@@ -222,14 +260,7 @@ export class D1Client {
     let delayMs = 500;
 
     while (Date.now() < deadline) {
-      const status = await this.request<{
-        success?: boolean;
-        status?: string;
-        error?: string;
-        messages?: string[];
-        result?: { meta?: D1Meta };
-        meta?: D1Meta;
-      }>(url, {
+      const status = await this.request<ImportPhaseResult>(url, {
         method: "POST",
         body: JSON.stringify({ action: "poll", current_bookmark: bookmark }),
       });

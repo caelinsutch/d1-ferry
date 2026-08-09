@@ -121,11 +121,23 @@ describe("CheckpointStore", () => {
     expect(store.totalRows()).toBe(150);
   });
 
-  it("rejects an unknown table rather than silently ignoring it", async () => {
+  it("adds a table the manifest has not seen, so changing --table does not crash", async () => {
     const dir = await tempDir();
     const store = await CheckpointStore.create(join(dir, "job.json"), baseManifest(["a"]));
 
-    await expect(store.complete("nope", 1)).rejects.toThrow(/No checkpoint entry/);
+    // A manifest is keyed on the source/target pair, not the table selection, so a
+    // later run with a different filter legitimately asks about an unknown table.
+    await store.advance("b", 10, { columns: ["rowid"], values: ["10"] });
+
+    expect(store.checkpointFor("b")).toMatchObject({ rowsCopied: 10, status: "in-progress" });
+
+    await store.complete("c", 5);
+    expect(store.checkpointFor("c")).toMatchObject({ rowsCopied: 5, status: "done" });
+
+    // And it survives a reload.
+    const reloaded = await CheckpointStore.load(join(dir, "job.json"));
+    expect(reloaded?.checkpointFor("b")?.rowsCopied).toBe(10);
+    expect(reloaded?.totalRows()).toBe(15);
   });
 
   it("fails loudly on a corrupt manifest instead of throwing a raw parse error", async () => {

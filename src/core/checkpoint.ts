@@ -151,10 +151,27 @@ export class CheckpointStore {
     return this.manifest.tables.reduce((sum, t) => sum + t.rowsCopied, 0);
   }
 
+  /**
+   * Find a table's checkpoint, creating it if the manifest predates this table.
+   *
+   * A manifest is keyed on the source/target pair, not on the table selection, so a
+   * later run with a different `--table` filter legitimately asks about tables the
+   * manifest has never seen. Adding them on demand keeps one job per database pair
+   * accumulating progress; throwing instead turned any change of selection into a
+   * hard crash.
+   */
   private require(table: string): TableCheckpoint {
-    const entry = this.manifest.tables.find((t) => t.table === table);
-    if (!entry) throw new Error(`No checkpoint entry for table "${table}".`);
-    return entry;
+    const existing = this.manifest.tables.find((t) => t.table === table);
+    if (existing) return existing;
+
+    const created: TableCheckpoint = {
+      table,
+      rowsCopied: 0,
+      cursor: null,
+      status: "pending",
+    };
+    this.manifest.tables.push(created);
+    return created;
   }
 
   /**
