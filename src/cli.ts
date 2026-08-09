@@ -8,7 +8,7 @@ import { registerList } from "./commands/list.ts";
 import { registerSchema } from "./commands/schema.ts";
 import { registerVerify } from "./commands/verify.ts";
 import { CliError } from "./util/errors.ts";
-import { createLogger, type LogLevel } from "./util/logger.ts";
+import { createLogger, resolveLogLevel } from "./util/logger.ts";
 
 const VERSION = "0.1.0";
 
@@ -30,11 +30,10 @@ function buildProgram(): Command {
 
   program.hook("preSubcommand", (thisCommand) => {
     const opts = thisCommand.opts();
-    const level: LogLevel = opts.verbose ? "debug" : opts.quiet ? "warn" : "info";
     thisCommand.setOptionValue(
       "logger",
       createLogger({
-        level,
+        level: resolveLogLevel(opts),
         json: Boolean(opts.json),
         color: opts.color !== false,
       }),

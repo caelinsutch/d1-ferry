@@ -103,21 +103,49 @@ Exits non-zero on any mismatch, so it drops straight into CI.
 
 ## Key options
 
-| Option                        | Default | Notes                                                  |
-| ----------------------------- | ------- | ------------------------------------------------------ |
-| `--statement-size <bytes>`    | `92KB`  | Per-`INSERT` budget. Hard ceiling is 100 KB.           |
-| `--page-size <rows>`          | `1000`  | Rows per read request.                                 |
-| `--file-size <bytes>`         | `24MB`  | Size of each `/import` payload. Hard ceiling is 5 GiB. |
-| `--conflict <mode>`           | `error` | One of `error`, `ignore`, `replace`.                   |
-| `--where <clause>`            | —       | Filter applied to every table.                         |
-| `-t, --table <names>`         | all     | Repeatable or comma-separated.                         |
-| `-x, --exclude-table <names>` | —       | Repeatable or comma-separated.                         |
-| `--limit <rows>`              | —       | `export` only. Sample roughly N rows per table.        |
-| `--no-defer-foreign-keys`     | off     | Disable `PRAGMA defer_foreign_keys`.                   |
-| `--dry-run`                   | off     | Report without writing.                                |
-| `--json`                      | off     | Newline-delimited JSON logs.                           |
+| Option                        | Default | Notes                                                      |
+| ----------------------------- | ------- | ---------------------------------------------------------- |
+| `--statement-size <bytes>`    | `92KB`  | Per-`INSERT` budget. Hard ceiling is 100 KB.               |
+| `--page-size <rows>`          | `1000`  | Rows per read request.                                     |
+| `--file-size <bytes>`         | `24MB`  | Size of each `/import` payload. Hard ceiling is 5 GiB.     |
+| `--conflict <mode>`           | `error` | One of `error`, `ignore`, `replace`.                       |
+| `--where <clause>`            | —       | Filter applied to every table.                             |
+| `-t, --table <names>`         | all     | Repeatable or comma-separated.                             |
+| `-x, --exclude-table <names>` | —       | Repeatable or comma-separated.                             |
+| `--limit <rows>`              | —       | `export` only. Sample roughly N rows per table.            |
+| `--no-defer-foreign-keys`     | off     | Disable `PRAGMA defer_foreign_keys`.                       |
+| `--dry-run`                   | off     | Report without writing.                                    |
+| `--json`                      | off     | Machine-readable results on stdout; NDJSON logs on stderr. |
 
 Sizes accept suffixes: `92000`, `64KB`, `24MB`, `1GB`.
+
+## Scripting
+
+`--json` writes a single JSON result document to **stdout** and sends progress and log
+output to **stderr** as NDJSON, so results pipe cleanly while progress stays visible on
+a terminal.
+
+```sh
+# Names of every database
+d1-ferry --json list | jq -r '.databases[].name'
+
+# Gate CI on content equality, not just row counts
+d1-ferry --json verify prod-db staging-db --checksum > report.json || {
+  jq -r '.tables[] | select(.match == false) | "\(.table): \(.reason)"' report.json
+  exit 1
+}
+
+# What would a copy move, without moving it?
+d1-ferry --json copy prod-db staging-db --dry-run | jq '.totals'
+
+# Every column and its declared type
+d1-ferry --json schema show prod-db |
+  jq -r '.tables[] | .name as $t | .columns[] | "\($t).\(.name) \(.type)"'
+```
+
+Commands exit non-zero on failure regardless of `--json`, so `verify` works as a gate.
+Int64 values are emitted as strings, since JSON numbers cannot represent them exactly;
+blobs are base64.
 
 ## Known limitations
 

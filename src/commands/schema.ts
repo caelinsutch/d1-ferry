@@ -3,7 +3,7 @@ import type { Command } from "commander";
 import { introspect, topologicalOrder } from "../core/schema.ts";
 import { buildContext, label, resolve } from "../util/context.ts";
 import { formatCount } from "../util/logger.ts";
-import { printTable } from "./list.ts";
+import { printTable, writeJson } from "../util/output.ts";
 
 export function registerSchema(program: Command): void {
   const schema = program.command("schema").description("inspect or copy database schema");
@@ -21,32 +21,70 @@ export function registerSchema(program: Command): void {
       const result = await introspect(context.client, ref.databaseId);
 
       if (options.ddl) {
-        for (const table of result.tables) {
-          if (table.ddl) process.stdout.write(`${table.ddl};\n`);
+        const statements = [
+          ...result.tables.map((t) => t.ddl).filter((d) => d !== null),
+          ...[...result.indexes, ...result.views, ...result.triggers].map((o) => o.ddl),
+        ];
+
+        if (context.json) {
+          writeJson({
+            database: { id: ref.databaseId, ...(ref.name ? { name: ref.name } : {}) },
+            ddl: statements,
+          });
+          return;
         }
-        for (const object of [...result.indexes, ...result.views, ...result.triggers]) {
-          process.stdout.write(`${object.ddl};\n`);
-        }
+        for (const statement of statements) process.stdout.write(`${statement};\n`);
         return;
       }
 
       const { order, cyclic } = topologicalOrder(result.tables);
       const byName = new Map(result.tables.map((t) => [t.name, t]));
+      const ordered = order.map((name) => byName.get(name)).filter((t) => t !== undefined);
+
+      if (context.json) {
+        writeJson({
+          database: { id: ref.databaseId, ...(ref.name ? { name: ref.name } : {}) },
+          tables: ordered.map((table) => ({
+            name: table.name,
+            columns: table.columns.map((c) => ({
+              name: c.name,
+              type: c.declaredType,
+              affinity: c.affinity,
+              notNull: c.notNull,
+              primaryKeyPosition: c.pkPosition,
+              default: c.defaultValue,
+            })),
+            primaryKey: table.columns
+              .filter((c) => c.pkPosition > 0)
+              .toSorted((a, b) => a.pkPosition - b.pkPosition)
+              .map((c) => c.name),
+            foreignKeys: table.foreignKeys,
+            withoutRowid: table.withoutRowid,
+            strict: table.strict,
+            inForeignKeyCycle: cyclic.includes(table.name),
+            ddl: table.ddl,
+          })),
+          indexes: result.indexes,
+          views: result.views,
+          triggers: result.triggers,
+          virtualTables: result.virtualTables,
+          foreignKeyCycle: cyclic,
+        });
+        return;
+      }
 
       printTable(
         ["table", "cols", "pk", "fks", "flags"],
-        order.map((name) => {
-          const table = byName.get(name);
-          if (!table) return [name, "?", "?", "?", ""];
+        ordered.map((table) => {
           const pk = table.columns.filter((c) => c.pkPosition > 0).map((c) => c.name);
           const flags = [
             table.withoutRowid ? "WITHOUT ROWID" : "",
             table.strict ? "STRICT" : "",
-            cyclic.includes(name) ? "FK CYCLE" : "",
+            cyclic.includes(table.name) ? "FK CYCLE" : "",
           ].filter(Boolean);
 
           return [
-            name,
+            table.name,
             String(table.columns.length),
             pk.length > 0 ? pk.join(",") : "(rowid)",
             String(table.foreignKeys.length),

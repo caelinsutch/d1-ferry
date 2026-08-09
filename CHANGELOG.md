@@ -24,6 +24,12 @@ Nothing here has been released yet; this is the pre-1.0 development history.
 
 ### Added
 
+- `--json` now emits a machine-readable **result** document on stdout for every command,
+  not just NDJSON logs on stderr. Previously the flag only changed log formatting while
+  `list`, `verify`, and `schema show` still printed human tables to stdout, which made it
+  useless for scripting despite its name. Results and logs are on separate streams, so
+  `d1-ferry --json verify a b | jq` works while progress stays visible. Int64 values are
+  strings (JSON numbers cannot hold them exactly) and blobs are base64.
 - `export --limit <rows>` to sample roughly N rows per table, which makes it practical to
   spot-check a very large table without pulling all of it.
 - End-to-end round-trip tests that run the real pipeline against actual SQLite via

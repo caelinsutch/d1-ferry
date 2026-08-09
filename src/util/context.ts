@@ -3,13 +3,18 @@ import type { Command } from "commander";
 import { D1Client } from "../core/client.ts";
 import { resolveAuth, resolveDatabase } from "../core/config.ts";
 import type { DatabaseRef } from "../core/types.ts";
-import { createLogger, type Logger } from "./logger.ts";
+import { createLogger, resolveLogLevel, type Logger } from "./logger.ts";
 
 /** Shared per-invocation state: credentials, client, and logger. */
 export interface Context {
   client: D1Client;
   accountId: string;
   logger: Logger;
+  /**
+   * True when `--json` was passed. Commands must emit a machine-readable result on
+   * stdout instead of a human table; logs go to stderr either way.
+   */
+  json: boolean;
 }
 
 /**
@@ -21,12 +26,13 @@ export interface Context {
 export function buildContext(command: Command): Context {
   const root = command.parent ?? command;
   const globals = root.opts();
+  const json = Boolean(globals.json);
 
   const logger =
     (root.getOptionValue("logger") as Logger | undefined) ??
     createLogger({
-      level: globals.verbose ? "debug" : globals.quiet ? "warn" : "info",
-      json: Boolean(globals.json),
+      level: resolveLogLevel(globals),
+      json,
       color: globals.color !== false,
     });
 
@@ -42,7 +48,7 @@ export function buildContext(command: Command): Context {
       logger.debug(`retry ${attempt} in ${delayMs}ms: ${reason}`),
   });
 
-  return { client, accountId, logger };
+  return { client, accountId, logger, json };
 }
 
 /** Resolve a database reference (name or UUID) within a context. */

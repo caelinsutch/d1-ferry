@@ -8,6 +8,7 @@ import type { TableInfo } from "../core/types.ts";
 import { CliError } from "../util/errors.ts";
 import { buildContext, label, parseIntOption, parseSizeOption, resolve } from "../util/context.ts";
 import { formatBytes, formatCount, formatDuration } from "../util/logger.ts";
+import { writeJson } from "../util/output.ts";
 
 export function registerExport(program: Command): void {
   program
@@ -65,6 +66,7 @@ export function registerExport(program: Command): void {
 
       // Stream to disk: a full export can far exceed available memory.
       const sink = Bun.file(outputPath).writer();
+      const perTable: Array<{ table: string; rows: number }> = [];
       let bytesWritten = 0;
       let rowsWritten = 0;
 
@@ -136,12 +138,31 @@ export function registerExport(program: Command): void {
             }
 
             rowsWritten += tableRows;
+            perTable.push({ table: table.name, rows: tableRows });
             logger.clearStatus();
             logger.success(`${table.name}: ${formatCount(tableRows)} rows`);
           }
         }
       } finally {
         await sink.end();
+      }
+
+      if (context.json) {
+        writeJson({
+          database: { id: ref.databaseId, ...(ref.name ? { name: ref.name } : {}) },
+          output: outputPath,
+          includedSchema: options.schema !== false,
+          includedData: options.data !== false,
+          tables: perTable,
+          totals: {
+            tables: ordered.length,
+            rows: rowsWritten,
+            bytes: bytesWritten,
+            durationMs: Date.now() - started,
+          },
+          skippedVirtualTables: schema.virtualTables.map((v) => v.name),
+        });
+        return;
       }
 
       logger.step("Summary");

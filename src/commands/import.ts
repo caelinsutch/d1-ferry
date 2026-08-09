@@ -6,6 +6,7 @@ import { byteLength } from "../core/sql.ts";
 import { CliError } from "../util/errors.ts";
 import { buildContext, label, parseSizeOption, resolve } from "../util/context.ts";
 import { formatBytes, formatCount, formatDuration } from "../util/logger.ts";
+import { writeJson } from "../util/output.ts";
 
 export function registerImport(program: Command): void {
   program
@@ -138,6 +139,22 @@ export function registerImport(program: Command): void {
 
         await flush();
         logger.clearStatus();
+
+        if (context.json) {
+          writeJson({
+            database: { id: ref.databaseId, ...(ref.name ? { name: ref.name } : {}) },
+            file,
+            fileBytes: totalBytes,
+            dryRun,
+            statements: statementCount,
+            payloads,
+            bytesSent: sentBytes,
+            skipped,
+            deferForeignKeys,
+            durationMs: Date.now() - started,
+          });
+          return;
+        }
 
         logger.step("Summary");
         if (dryRun) {

@@ -30,6 +30,13 @@ export interface LoggerOptions {
   color: boolean;
 }
 
+/** Choose a log level from the global verbosity flags. */
+export function resolveLogLevel(options: { verbose?: unknown; quiet?: unknown }): LogLevel {
+  if (options.verbose) return "debug";
+  if (options.quiet) return "warn";
+  return "info";
+}
+
 export function createLogger(options: LoggerOptions): Logger {
   const { level, json, color } = options;
   const threshold = ORDER[level];

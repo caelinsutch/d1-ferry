@@ -6,7 +6,7 @@ import { introspect } from "../core/schema.ts";
 import { CliError } from "../util/errors.ts";
 import { buildContext, label, resolve } from "../util/context.ts";
 import { formatCount } from "../util/logger.ts";
-import { printTable } from "./list.ts";
+import { printTable, writeJson } from "../util/output.ts";
 
 export function registerVerify(program: Command): void {
   program
@@ -58,14 +58,14 @@ export function registerVerify(program: Command): void {
         }
 
         const targetNames = new Set(targetSchema.tables.map((t) => t.name));
-        const rows: string[][] = [];
+        const results: TableComparison[] = [];
         let mismatches = 0;
 
         for (const table of selected) {
           logger.status(`counting ${table.name}…`);
 
           if (!targetNames.has(table.name)) {
-            rows.push([table.name, "—", "MISSING", "✗"]);
+            results.push({ table: table.name, match: false, reason: "missing-on-target" });
             mismatches++;
             continue;
           }
@@ -75,12 +75,15 @@ export function registerVerify(program: Command): void {
             countRows(context.client, targetRef.databaseId, table.name),
           ]);
 
-          let ok = sourceCount === targetCount;
-          let note = ok
-            ? "✓"
-            : `${targetCount - sourceCount > 0 ? "+" : ""}${targetCount - sourceCount}`;
+          const comparison: TableComparison = {
+            table: table.name,
+            sourceRows: sourceCount,
+            targetRows: targetCount,
+            match: sourceCount === targetCount,
+          };
+          if (!comparison.match) comparison.reason = "row-count";
 
-          if (ok && options.checksum) {
+          if (comparison.match && options.checksum) {
             logger.status(`digesting ${table.name} (reads every row on both sides)…`);
             const [sourceDigest, targetDigest] = await Promise.all([
               tableDigest(
@@ -91,23 +94,54 @@ export function registerVerify(program: Command): void {
               ),
               tableDigest(context.client, targetRef.databaseId, table),
             ]);
-            ok = sourceDigest.digest === targetDigest.digest;
-            note = ok ? `✓ ${sourceDigest.digest}` : "✗ content differs";
+
+            comparison.sourceDigest = sourceDigest.digest;
+            comparison.targetDigest = targetDigest.digest;
+            comparison.match = sourceDigest.digest === targetDigest.digest;
+            if (!comparison.match) comparison.reason = "content";
           }
 
-          if (!ok) mismatches++;
-          rows.push([table.name, formatCount(sourceCount), formatCount(targetCount), note]);
+          if (!comparison.match) mismatches++;
+          results.push(comparison);
         }
 
         logger.clearStatus();
-        printTable(["table", "source", "target", "status"], rows);
 
         const extra = targetSchema.tables
           .map((t) => t.name)
           .filter((name) => !selected.some((t) => t.name === name));
 
-        if (extra.length > 0) {
-          logger.info(`Tables only on target: ${extra.join(", ")}`);
+        if (context.json) {
+          writeJson({
+            source: {
+              id: sourceRef.databaseId,
+              ...(sourceRef.name ? { name: sourceRef.name } : {}),
+            },
+            target: {
+              id: targetRef.databaseId,
+              ...(targetRef.name ? { name: targetRef.name } : {}),
+            },
+            match: mismatches === 0,
+            checked: results.length,
+            mismatches,
+            digestCompared: Boolean(options.checksum),
+            tables: results,
+            onlyOnTarget: extra,
+          });
+        } else {
+          printTable(
+            ["table", "source", "target", "status"],
+            results.map((r) => [
+              r.table,
+              r.sourceRows === undefined ? "—" : formatCount(r.sourceRows),
+              r.targetRows === undefined ? "MISSING" : formatCount(r.targetRows),
+              describe(r),
+            ]),
+          );
+
+          if (extra.length > 0) {
+            logger.info(`Tables only on target: ${extra.join(", ")}`);
+          }
         }
 
         if (mismatches > 0) {
@@ -116,9 +150,31 @@ export function registerVerify(program: Command): void {
           });
         }
 
-        logger.success(`All ${selected.length} tables match.`);
+        if (!context.json) logger.success(`All ${selected.length} tables match.`);
       },
     );
+}
+
+/** Outcome of comparing one table across two databases. */
+interface TableComparison {
+  table: string;
+  match: boolean;
+  sourceRows?: number;
+  targetRows?: number;
+  sourceDigest?: string;
+  targetDigest?: string;
+  reason?: "missing-on-target" | "row-count" | "content";
+}
+
+/** Human-readable status cell for one comparison. */
+function describe(r: TableComparison): string {
+  if (r.reason === "missing-on-target") return "✗ missing";
+  if (r.reason === "content") return "✗ content differs";
+  if (r.reason === "row-count") {
+    const delta = (r.targetRows ?? 0) - (r.sourceRows ?? 0);
+    return `${delta > 0 ? "+" : ""}${delta}`;
+  }
+  return r.sourceDigest ? `✓ ${r.sourceDigest}` : "✓";
 }
 
 function collect(value: string, previous: string[]): string[] {

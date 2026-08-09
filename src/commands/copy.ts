@@ -7,6 +7,7 @@ import type { TableInfo } from "../core/types.ts";
 import { CliError } from "../util/errors.ts";
 import { buildContext, label, parseIntOption, parseSizeOption, resolve } from "../util/context.ts";
 import { formatBytes, formatCount, formatDuration } from "../util/logger.ts";
+import { writeJson } from "../util/output.ts";
 
 export function registerCopy(program: Command): void {
   program
@@ -150,10 +151,12 @@ export function registerCopy(program: Command): void {
 
         let totalRows = 0;
         let totalBytes = 0;
+        const perTable: Array<Record<string, unknown>> = [];
 
         for (const table of ordered) {
           if (checkpoints?.checkpointFor(table.name)?.status === "done") {
             logger.info(`${table.name}: already complete, skipping.`);
+            perTable.push({ table: table.name, skipped: "already-complete", rows: 0 });
             continue;
           }
 
@@ -161,6 +164,13 @@ export function registerCopy(program: Command): void {
             const result = await engine.copyTable(table, checkpoints ?? undefined);
             totalRows += result.rowsCopied;
             totalBytes += result.bytesSent;
+            perTable.push({
+              table: result.table,
+              rows: result.rowsCopied,
+              bytes: result.bytesSent,
+              statements: result.statements,
+              durationMs: result.durationMs,
+            });
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             logger.clearStatus();
@@ -186,6 +196,31 @@ export function registerCopy(program: Command): void {
               cause: error,
             });
           }
+        }
+
+        if (context.json) {
+          writeJson({
+            source: {
+              id: sourceRef.databaseId,
+              ...(sourceRef.name ? { name: sourceRef.name } : {}),
+            },
+            target: {
+              id: targetRef.databaseId,
+              ...(targetRef.name ? { name: targetRef.name } : {}),
+            },
+            dryRun: transferOptions.dryRun,
+            conflict: transferOptions.conflict,
+            tables: perTable,
+            totals: {
+              tables: ordered.length,
+              rows: totalRows,
+              bytes: totalBytes,
+              durationMs: Date.now() - started,
+            },
+            skippedVirtualTables: schema.virtualTables.map((v) => v.name),
+            foreignKeyCycle: cyclic,
+          });
+          return;
         }
 
         logger.step("Summary");
